@@ -14,16 +14,20 @@ using DataStructures
 using HierarchicalUtils
 using ChainRulesCore
 using Accessors
+using Reexport
+
+include("mill_extension/MillExt.jl")
+@reexport using .MillExtension
 
 """
 initproblem(ex, problem; add_goal = true)
 
 Specialize extractor for the given problem instance and return init state 
 """
-function initproblem(ex, problem; add_goal = true)
-	ex = specialize(ex, problem)
-	pddle = add_goal ? add_goalstate(ex, problem) : ex
-	pddle, initstate(ex.domain, problem)
+function initproblem(ex, problem; add_goal=true)
+    ex = specialize(ex, problem)
+    pddle = add_goal ? add_goalstate(ex, problem) : ex
+    pddle, initstate(ex.domain, problem)
 end
 export initproblem
 
@@ -31,11 +35,14 @@ export initproblem
 include("relational/knowledge_base.jl")
 include("relational/knowledge_model.jl")
 export KBEntry, KnowledgeBase, append
-include("hyper/extractor.jl")
-include("hyper/deduplication.jl")
-include("hyper/dedu_matrix.jl")
-export HyperExtractor, deduplicate
-include("hyper/mha.jl")
+
+include("lifted_relational/MixedLRNN/extractor.jl")
+include("lifted_relational/LRNN/extractor.jl")
+include("lifted_relational/deduplication.jl")
+include("lifted_relational/dedu_matrix.jl")
+export MixedLRNN, LRNN, deduplicate
+
+include("lifted_relational/mha.jl")
 export MultiheadAttention
 
 include("asnets/extractor.jl")
@@ -60,6 +67,7 @@ include("artificial_goals.jl")
 include("sample_trace.jl")
 export sample_trace, sample_forward_trace, sample_backward_trace, sample_backward_tree, search_tree_from_trajectory
 export BackwardSampler
+
 include("heuristic.jl")
 export NeuroHeuristic
 
