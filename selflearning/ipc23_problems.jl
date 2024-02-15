@@ -6,6 +6,7 @@ function save_plan(ofile, plan)
             s = "(" * join([a.name, a.args...], " ") * ")"
             println(fio, s)
         end
+        println(fio, "; cost = $(length(plan)) (unit cost)")
     end
 end
 
@@ -19,14 +20,18 @@ function load_plan(pfile)
     end[1:end-1]
 end
 
-function setup_training(problem_name)
-    sdir(s...) = joinpath("..", "ipc23_problems", problem_name, s...)
-    domain_pddl = sdir("domain.pddl")
-    problem_files = [sdir(f) for f in readdir(sdir()) if endswith(f, ".pddl") && f !== "domain.pddl"]
-    return (domain_pddl, problem_files)
+"""
+(domain_pddl, problem_files, plan_files) = get_training_problems(problem, sort_by_complexity)
+
+if sort_by_complexity is true, problem_files are sorted by their specified difficulty.
+"""
+function get_training_problems(problem, sort_by_complexity)
+    !sort_by_complexity && return (setup_training_problems(problem))
+    (domain_pddl, problem_files, plan_files) = setup_training_problems(problem)
+    return (domain_pddl, reverse(problem_files), reverse(plan_files))
 end
 
-function get_training_problems(problem)
+function setup_training_problems(problem)
     problem == "blocks" && return (setup_training("blocksworld"))
     problem == "blocksworld" && return (setup_training("blocksworld"))
     problem == "childsnack" && return (setup_training("childsnack"))
@@ -41,17 +46,55 @@ function get_training_problems(problem)
     error("unknown problem $(problem)")
 end
 
-"""
-(domain_pddl, problem_files) =  getproblem(problem)
-(domain_pddl, problem_files) =  getproblem(problem, sort_by_complexity)
+function setup_training(problem_name)
+    sdir(s...) = joinpath("ipc23-problems", problem_name, s...)
+    domain_pddl = sdir("domain.pddl")
+    problem_files = [sdir(joinpath("training", "easy", f)) for f in readdir(sdir(joinpath("training", "easy")))]
+    plan_files = [sdir(joinpath("training_plans", f)) for f in readdir(sdir(joinpath("training_plans")))]
+    return (domain_pddl, problem_files, plan_files)
+end
 
-if sort_by_complexity is true, problem_files are sorted by the number of objects, 
-which is treated as a proxy for complexity.
+
 """
-function get_training_problems(problem, sort_by_complexity)
-    !sort_by_complexity && return (get_training_problems(problem))
-    (domain_pddl, problem_files) = get_training_problems(problem)
-    no = map(f -> length(load_problem(f).objects), problem_files)
-    problem_files = problem_files[sortperm(no)]
-    return (domain_pddl, problem_files)
+(problem_files, plan_files) = get_testing_problems(problem; difficulty=:none)
+
+if difficulty is not specified, problem_files of difficulty `:easy`, `:medium` and `:hard` are returned, 
+    with their specified plans.
+"""
+function get_testing_problems(problem; difficulty=:none)
+    if difficulty == :none
+        (vcat(map((:easy, :medium, :hard)) do diff
+                diff = _get_testing_problems(problem, diff)
+            end...),
+            get_solutions(problem)
+        )
+    else
+        return (_get_testing_problems(problem, difficulty), _get_solutions(problem, difficulty))
+    end
+end
+
+function _get_testing_problems(problem_name, difficulty)
+    sdir(s...) = joinpath("ipc23-problems", problem_name, "testing", string(difficulty), s...)
+    [sdir(f) for f in readdir(sdir())]
+end
+
+
+"""
+plan_files = get_solutions(problem; difficulty=:none)
+
+if difficulty is not specified, plan_files of difficulty `:easy`, `:medium` and `:hard` are returned.
+"""
+function get_solutions(problem; difficulty=:none)
+    if difficulty == :none
+        vcat(map((:easy, :medium, :hard)) do diff
+            _get_solutions(problem, diff)
+        end...)
+    else
+        _get_solutions(problem, difficulty)
+    end
+end
+
+function _get_solutions(problem_name, difficulty; type=:testing)
+    sdir(s...) = joinpath("ipc23-problems", "solutions", problem_name, string(type), string(difficulty), s...)
+    [sdir(f) for f in readdir(sdir())]
 end
