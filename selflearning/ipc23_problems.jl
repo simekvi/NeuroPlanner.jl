@@ -47,10 +47,13 @@ function setup_training_problems(problem)
 end
 
 function setup_training(problem_name)
-    sdir(s...) = joinpath("ipc23-problems", problem_name, s...)
-    domain_pddl = sdir("domain.pddl")
-    problem_files = [sdir(joinpath("training", "easy", f)) for f in readdir(sdir(joinpath("training", "easy")))]
-    plan_files = [sdir(joinpath("training_plans", f)) for f in readdir(sdir(joinpath("training_plans")))]
+    pdir(s...) = joinpath("ipc23-problems", problem_name, s...)
+    sdir(s...) = joinpath("ipc23-problems", "solutions", problem_name, "training", "easy", s...)
+
+    domain_pddl = pdir("domain.pddl")
+    problem_files = [pdir(joinpath("training", "easy", f)) for f in readdir(pdir(joinpath("training", "easy")))]
+    # plan_files = [pdir(joinpath("training_plans", f)) for f in readdir(pdir(joinpath("training_plans")))]
+    plan_files = [sdir(joinpath(f)) for f in readdir(sdir())]
     return (domain_pddl, problem_files, plan_files)
 end
 
