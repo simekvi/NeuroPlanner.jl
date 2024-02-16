@@ -47,8 +47,8 @@ function setup_training_problems(problem)
 end
 
 function setup_training(problem_name)
-    pdir(s...) = joinpath("ipc23-problems", problem_name, s...)
-    sdir(s...) = joinpath("ipc23-problems", "solutions", problem_name, "training", "easy", s...)
+    pdir(s...) = joinpath("..", "ipc23-problems", problem_name, s...)
+    sdir(s...) = joinpath("..", "ipc23-problems", "solutions", problem_name, "training", "easy", s...)
 
     domain_pddl = pdir("domain.pddl")
     problem_files = [pdir(joinpath("training", "easy", f)) for f in readdir(pdir(joinpath("training", "easy")))]
@@ -77,7 +77,7 @@ function get_testing_problems(problem; difficulty=:none)
 end
 
 function _get_testing_problems(problem_name, difficulty)
-    sdir(s...) = joinpath("ipc23-problems", problem_name, "testing", string(difficulty), s...)
+    sdir(s...) = joinpath("..", "ipc23-problems", problem_name, "testing", string(difficulty), s...)
     [sdir(f) for f in readdir(sdir())]
 end
 
@@ -98,6 +98,6 @@ function get_solutions(problem; difficulty=:none)
 end
 
 function _get_solutions(problem_name, difficulty; type=:testing)
-    sdir(s...) = joinpath("ipc23-problems", "solutions", problem_name, string(type), string(difficulty), s...)
+    sdir(s...) = joinpath("..", "ipc23-problems", "solutions", problem_name, string(type), string(difficulty), s...)
     [sdir(f) for f in readdir(sdir())]
 end
