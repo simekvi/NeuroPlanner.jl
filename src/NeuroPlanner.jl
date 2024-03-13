@@ -42,6 +42,12 @@ include("lifted_relational/deduplication.jl")
 include("lifted_relational/dedu_matrix.jl")
 export MixedLRNN, LRNN, deduplicate
 
+include("object_binary/normal/extractor.jl")
+export ObjectBinary
+
+include("object_binary/pair/extractor.jl")
+export ObjPairBin
+
 include("lifted_relational/mha.jl")
 export MultiheadAttention
 
