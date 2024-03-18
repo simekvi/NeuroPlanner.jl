@@ -29,7 +29,7 @@ vertex corresponding to the hyper-edge and its vertices.
 --- `model_params` some parameters of an algorithm constructing the message passing passes 
 """
 
-struct ObjPairBin{DO,D,N,MP,S,G}
+struct ObjPairBin{DO,D,N,MP,DV,V,S,G}
     domain::DO
     multiarg_predicates::NTuple{N,Symbol}
     unary_predicates::Dict{Symbol,Int64}
@@ -38,17 +38,17 @@ struct ObjPairBin{DO,D,N,MP,S,G}
     constmap::Dict{Symbol,Int64}
     model_params::MP
     obj2id::D
-    obj2pid::Dict{Symbol,Tuple{Int64,Int64}}
-    pairs::Vector{Tuple{Symbol,Symbol}}
+    obj2pid::DV
+    pairs::V
     init_state::S
     goal_state::G
     function ObjPairBin(domain::DO, multiarg_predicates::NTuple{N,Symbol}, unary_predicates::Dict{Symbol,Int64}, nullary_predicates::Dict{Symbol,Int64},
-        objtype2id::Dict{Symbol,Int64}, constmap::Dict{Symbol,Int64}, model_params::MP, obj2id::D, obj2pid::Dict{Symbol,Tuple{Int64,Int64}},
-        pairs::Vector{Tuple{Symbol,Symbol}}, init::S, goal::G) where {DO,D,N,MP<:NamedTuple,S,G}
+        objtype2id::Dict{Symbol,Int64}, constmap::Dict{Symbol,Int64}, model_params::MP, obj2id::D, obj2pid::DV,
+        pairs::V, init::S, goal::G) where {DO,D,N,MP<:NamedTuple,DV,V,S,G}
 
         @assert issubset((:message_passes, :residual), keys(model_params)) "Parameters of the model are not fully specified"
         @assert (init === nothing || goal === nothing) "Fixing init and goal state is bizzaare, as the extractor would always create a constant"
-        new{DO,D,N,MP,S,G}(domain, multiarg_predicates, unary_predicates, nullary_predicates, objtype2id, constmap, model_params, obj2id, obj2pid, pairs, init, goal)
+        new{DO,D,N,MP,DV,V,S,G}(domain, multiarg_predicates, unary_predicates, nullary_predicates, objtype2id, constmap, model_params, obj2id, obj2pid, pairs, init, goal)
     end
 end
 
@@ -64,9 +64,10 @@ function ObjPairBin(domain; message_passes=2, residual=:linear, kwargs...)
     multiarg_predicates = tuple([kv[1] for kv in predicates if length(kv[2].args) > 1]...)
     unary_predicates = dictmap([kv[1] for kv in predicates if length(kv[2].args) == 1])
     nullary_predicates = dictmap([kv[1] for kv in predicates if length(kv[2].args) < 1])
-    objtype2id = Dict(s => i + length(nunanary_predicates) for (i, s) in enumerate(collect(keys(domain.typetree))))
+    objtype2id = Dict(s => i + length(unary_predicates) for (i, s) in enumerate(collect(keys(domain.typetree))))
     constmap = Dict{Symbol,Int}(dictmap([x.name for x in domain.constants]))
-    ObjPairBin(domain, multiarg_predicates, unary_predicates, nullary_predicates, objtype2id, constmap, model_params, nothing, nothing, nothing, nothing, nothing)
+    ObjPairBin(domain, multiarg_predicates, unary_predicates, nullary_predicates, objtype2id, constmap, model_params, 
+        nothing, nothing, nothing, nothing, nothing)
 end
 
 isspecialized(ex::ObjPairBin) = ex.obj2id !== nothing
@@ -81,11 +82,11 @@ end
 function Base.show(io::IO, ex::ObjPairBin)
     if !isspecialized(ex)
         print(io, "Unspecialized extractor for ", ex.domain.name,
-            " (", length(ex.nunanary_predicates), ", ", length(ex.multiarg_predicates), ")")
+            " (", length(ex.unary_predicates), ", ", length(ex.multiarg_predicates), ")")
     else
         g = hasgoal(ex) ? "with" : "without"
         print(io, "Specialized extractor ", g, " goal for ", ex.domain.name,
-            " (", length(ex.nunanary_predicates), ", ", length(ex.multiarg_predicates), ", ", length(ex.obj2id), ")")
+            " (", length(ex.unary_predicates), ", ", length(ex.multiarg_predicates), ", ", length(ex.obj2id), ")")
     end
 end
 
@@ -106,16 +107,15 @@ function specialize(ex::ObjPairBin, problem)
         push!(obj2idv, (k, length(obj2idv) + 1))
     end
 
-    obj2pid = Dict(i => [] for i in 1:length(obj2idv))
+    obj2pid = Dict(v[1] => [] for v in obj2idv)
     offset = -length(obj2idv)
 
     pairs = map(obj2idv) do (name, id)
-        global offset
         offset += length(obj2idv) + 1 - id
         p = []
         for i in id:length(obj2idv)
-            push!(obj2pid[id], (offset + i, 1))
-            push!(obj2pid[i], (offset + i, 2))
+            push!(obj2pid[name], (offset + i, 1))
+            push!(obj2pid[obj2idv[i][1]], (offset + i, 2))
             push!(p, (name, obj2idv[i][1]))
         end
         p
@@ -182,8 +182,26 @@ Creates a matrix with one column per pairs of objects and encode by one-hot-enco
 """
 function feature_vectors(ex::ObjPairBin, state)
 
-    idim = 2 * (length(ex.unary_predicates) + length(ex.objtype2id) + length(ex.constmap)) + length(ex.multiarg_predicates) + length(ex.nullary_predicates) + length(ex.multiarg_predicates)
+    idim = 2 * (length(ex.unary_predicates) + length(ex.objtype2id) + length(ex.constmap)) 
+        + length(ex.multiarg_predicates) + length(ex.nullary_predicates) + length(ex.multiarg_predicates)
     x = zeros(Float32, idim, length(ex.pairs))
+    
+    # first object in pair
+
+    offset = length(ex.unary_predicates) + length(ex.objtype2id)
+    for (k, i) in ex.constmap
+        js = ex.obj2id[k]
+        for (j, pos) in js
+            x[offset + i, j, post]
+        end
+    end
+
+        # encode constants
+        offset = length(ex.nunanary_predicates) + length(ex.objtype2id)
+        for (k, i) in ex.constmap
+            j = ex.obj2id[k]
+            x[offset+i, j] = 1
+        end
 
 
 
@@ -192,11 +210,10 @@ function feature_vectors(ex::ObjPairBin, state)
     # unary_predicates  
 
 
-    # encode constants
-
-
-
     # encode types of objects
+    
+    
+    # encode constants
 
     # )
 

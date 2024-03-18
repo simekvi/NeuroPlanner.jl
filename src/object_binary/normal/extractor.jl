@@ -1,21 +1,22 @@
 using PDDL: get_facts, get_args
 """
 struct ObjectBinary{DO,D,N,MP,S,G}
-	domain::DO
-	multiarg_predicates::NTuple{N,Symbol}
-	nunanary_predicates::Dict{Symbol,Int64}
-	objtype2id::Dict{Symbol,Int64}
-	constmap::Dict{Symbol, Int64}
-	model_params::NamedTuple{(:message_passes, :residual), Tuple{Int64, Symbol}}
-	obj2id::D
-	goal::G
+    domain::DO
+    multiarg_predicates::NTuple{N,Symbol}
+    nunanary_predicates::Dict{Symbol,Int64}
+    objtype2id::Dict{Symbol,Int64}
+    constmap::Dict{Symbol,Int64}
+    model_params::MP
+    obj2id::D
+    init_state::S
+    goal_state::G
 end
 
-Represents a PDDL state as a hypergraph, whre 
+Represents a PDDL state as a multigraph, where 
 - Each node is either an object or a contant
 - unary predicate is a property of an object
 - nullary predicate is a property of all objects
-- n-ary predicate is a hyper-edge
+- n-ary predicate is an edge between two vertices / objects which are 
 
 The computational model is message-passing over hyper-graph, which is essentially 
 a message passing over a bipartite graph, where left vertices corresponds to vertices
@@ -23,8 +24,8 @@ in hypergraph and right vertices corresponds to hyper-edges. There is an edge be
 vertex corresponding to the hyper-edge and its vertices.
 
 --- `multiarg_predicates` is a list of all n-ary predicates
---- `nunary_predicates` maps unary predicates to an index in one-hot encoded vertex' properties 
---- `objtype2id` maps unary predicates to an index in one-hot encoded vertex' properties 
+--- `nunanary_predicates` maps unary and nullary predicates to an index in one-hot encoded vertex' properties 
+--- `objtype2id` maps object types to an index in one-hot encoded vertex' properties 
 --- `constmap` maps constants to an index in one-hot encoded vertex' properties 
 --- `model_params` some parameters of an algorithm constructing the message passing passes 
 """
@@ -144,46 +145,6 @@ create a unique name of the layer for KnowledgeBase `kb`
 """
 layer_name(kb::KnowledgeBase{KS,<:Any}, prefix) where {KS} = Symbol(prefix * "_$(length(KS)+1)")
 
-
-
-# """
-# nunary_predicates(ex::ObjectBinary, state)
-
-# Create matrix with one column per object and encode by one-hot-encoding unary predicates 
-# and types of objects. Nunary predicates are encoded as properties of all objects.
-# """
-# function nunary_predicates(ex::ObjectBinary, state)
-#     # first, we completely specify the matrix with properties
-#     idim = length(ex.nunanary_predicates) + length(ex.objtype2id)
-#     x = zeros(Float32, idim, length(ex.obj2id))
-
-#     # encode types of objects
-#     for s in state.types
-#         i = ex.objtype2id[s.name]
-#         j = ex.obj2id[only(s.args).name]
-#         x[i, j] = 1
-#     end
-
-#     for f in filter(f -> length(get_args(f)) < 2, get_facts(state))
-#         v = 1
-#         if (f isa PDDL.Compound) && (f.name == :not)
-#             f = only(f.args)
-#             v = 0
-#         end
-#         a = get_args(f)
-#         pid = ex.nunanary_predicates[f.name]
-#         if length(a) == 1
-#             vid = ex.obj2id[only(get_args(f)).name]
-#             x[pid, vid] = v
-#         else
-#             length(a) == 0
-#             x[pid, :] .= v
-#         end
-#     end
-#     x
-# end
-
-
 """
 nunary_predicates(ex::ObjectBinary, state)
 
@@ -240,6 +201,23 @@ function multi_predicates(ex::ObjectBinary, kid::Symbol, state, prefix=nothing)
     ProductNode(NamedTuple{ns}(xs))
 end
 
+"""
+encode_predicates(ex::ObjectBinary, pname::Symbol, preds, kid::Symbol)
+
+Encodes predicates for an ObjectBinary instance.
+
+Arguments:
+- ex::ObjectBinary: ObjectBinary instance
+- pname::Symbol: Predicate name
+- preds: Predicates
+- kid::Symbol: Symbol representing the key ID
+
+Returns:
+- BagNode: Encoded predicates as a BagNode
+
+This function encodes predicates for an ObjectBinary instance using the given predicate name, predicates, and key ID.
+"""
+
 function encode_predicates(ex::ObjectBinary, pname::Symbol, preds, kid::Symbol)
     p = ex.domain.predicates[pname]
     obj2id = ex.obj2id
@@ -263,9 +241,6 @@ function encode_predicates(ex::ObjectBinary, pname::Symbol, preds, kid::Symbol)
 
     BagNode(x, ScatteredBags(bags))
 end
-
-
-
 
 function add_goalstate(ex::ObjectBinary, problem, goal=goalstate(ex.domain, problem))
     ex = isspecialized(ex) ? ex : specialize(ex, problem)
