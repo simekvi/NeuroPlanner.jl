@@ -29,9 +29,9 @@ vertex corresponding to the hyper-edge and its vertices.
 --- `model_params` some parameters of an algorithm constructing the message passing passes 
 """
 
-struct ObjPairBin{DO,D,N,MP,DV,V,S,G}
+struct ObjPairBin{DO,D,MP,DV,DT,V,S,G}
     domain::DO
-    multiarg_predicates::NTuple{N,Symbol}
+    multiarg_predicates::Dict{Symbol,Int64}
     unary_predicates::Dict{Symbol,Int64}
     nullary_predicates::Dict{Symbol,Int64}
     objtype2id::Dict{Symbol,Int64}
@@ -39,35 +39,37 @@ struct ObjPairBin{DO,D,N,MP,DV,V,S,G}
     model_params::MP
     obj2id::D
     obj2pid::DV
+    pair2id::DT
     pairs::V
     init_state::S
     goal_state::G
-    function ObjPairBin(domain::DO, multiarg_predicates::NTuple{N,Symbol}, unary_predicates::Dict{Symbol,Int64}, nullary_predicates::Dict{Symbol,Int64},
-        objtype2id::Dict{Symbol,Int64}, constmap::Dict{Symbol,Int64}, model_params::MP, obj2id::D, obj2pid::DV,
-        pairs::V, init::S, goal::G) where {DO,D,N,MP<:NamedTuple,DV,V,S,G}
+    function ObjPairBin(domain::DO, multiarg_predicates::Dict{Symbol,Int64}, unary_predicates::Dict{Symbol,Int64}, nullary_predicates::Dict{Symbol,Int64},
+        objtype2id::Dict{Symbol,Int64}, constmap::Dict{Symbol,Int64}, model_params::MP, obj2id::D, obj2pid::DV, pair2id::DT,
+        pairs::V, init::S, goal::G) where {DO,D,MP<:NamedTuple,DV,DT,V,S,G}
 
         @assert issubset((:message_passes, :residual), keys(model_params)) "Parameters of the model are not fully specified"
         @assert (init === nothing || goal === nothing) "Fixing init and goal state is bizzaare, as the extractor would always create a constant"
-        new{DO,D,N,MP,DV,V,S,G}(domain, multiarg_predicates, unary_predicates, nullary_predicates, objtype2id, constmap, model_params, obj2id, obj2pid, pairs, init, goal)
+        new{DO,D,MP,DV,DT,V,S,G}(domain, multiarg_predicates, unary_predicates, nullary_predicates, objtype2id, constmap, model_params,
+            obj2id, obj2pid, pair2id, pairs, init, goal)
     end
 end
 
 
-ObjPairBinNoGoal{DO,D,N,MP} = ObjPairBin{DO,D,N,MP,Nothing,Nothing} where {DO,D,N,MP}
-ObjPairBinStart{DO,D,N,MP,S} = ObjPairBin{DO,D,N,MP,S,Nothing} where {DO,D,N,MP,S<:KnowledgeBase}
-ObjPairBinGoal{DO,D,N,MP,S} = ObjPairBin{DO,D,N,MP,Nothing,S} where {DO,D,N,MP,S<:KnowledgeBase}
+ObjPairBinNoGoal{DO,D,MP} = ObjPairBin{DO,D,MP,Nothing,Nothing} where {DO,D,MP}
+ObjPairBinStart{DO,D,MP,S} = ObjPairBin{DO,D,MP,S,Nothing} where {DO,D,MP,S<:KnowledgeBase}
+ObjPairBinGoal{DO,D,MP,S} = ObjPairBin{DO,D,MP,Nothing,S} where {DO,D,MP,S<:KnowledgeBase}
 
 function ObjPairBin(domain; message_passes=2, residual=:linear, kwargs...)
     model_params = (; message_passes, residual)
     dictmap(x) = Dict(reverse.(enumerate(sort(x))))
     predicates = collect(domain.predicates)
-    multiarg_predicates = tuple([kv[1] for kv in predicates if length(kv[2].args) > 1]...)
+    multiarg_predicates = dictmap([kv[1] for kv in predicates if length(kv[2].args) > 1])
     unary_predicates = dictmap([kv[1] for kv in predicates if length(kv[2].args) == 1])
     nullary_predicates = dictmap([kv[1] for kv in predicates if length(kv[2].args) < 1])
     objtype2id = Dict(s => i + length(unary_predicates) for (i, s) in enumerate(collect(keys(domain.typetree))))
     constmap = Dict{Symbol,Int}(dictmap([x.name for x in domain.constants]))
-    ObjPairBin(domain, multiarg_predicates, unary_predicates, nullary_predicates, objtype2id, constmap, model_params, 
-        nothing, nothing, nothing, nothing, nothing)
+    ObjPairBin(domain, multiarg_predicates, unary_predicates, nullary_predicates, objtype2id, constmap, model_params,
+        nothing, nothing, nothing, nothing, nothing, nothing)
 end
 
 isspecialized(ex::ObjPairBin) = ex.obj2id !== nothing
@@ -107,23 +109,27 @@ function specialize(ex::ObjPairBin, problem)
         push!(obj2idv, (k, length(obj2idv) + 1))
     end
 
-    obj2pid = Dict(v[1] => [] for v in obj2idv)
+    obj2pid = Dict(v[1] => Tuple{Int64,Int64}[] for v in obj2idv)
+    pair2id = Dict{Tuple{Symbol,Symbol},Int32}()
+
     offset = -length(obj2idv)
 
     pairs = map(obj2idv) do (name, id)
+        # global offset
         offset += length(obj2idv) + 1 - id
-        p = []
+        p = Tuple{Symbol,Symbol}[]
         for i in id:length(obj2idv)
             push!(obj2pid[name], (offset + i, 1))
             push!(obj2pid[obj2idv[i][1]], (offset + i, 2))
             push!(p, (name, obj2idv[i][1]))
+            pair2id[(name, obj2idv[i][1])] = offset + i
         end
         p
         # [(name, obj2idv[i][1]) for i in id:length(obj2idv)]
     end |> (arrays -> vcat(arrays...))
 
     ObjPairBin(ex.domain, ex.multiarg_predicates, ex.unary_predicates, ex.nullary_predicates, ex.objtype2id,
-        ex.constmap, ex.model_params, obj2id, obj2pid, pairs, nothing, nothing)
+        ex.constmap, ex.model_params, obj2id, obj2pid, pair2id, pairs, nothing, nothing)
 end
 
 function (ex::ObjPairBin)(state::GenericState)
@@ -135,7 +141,7 @@ end
 function encode_state(ex::ObjPairBin, state::GenericState, prefix=nothing)
     message_passes, residual = ex.model_params
     # rename to feature vectors
-    x = nunary_predicates(ex, state)
+    x = feature_vectors(ex, state)
     kb = KnowledgeBase((; x1=x))
     n = size(x, 2)
     sₓ = :x1
@@ -153,130 +159,84 @@ function encode_state(ex::ObjPairBin, state::GenericState, prefix=nothing)
     kb = append(kb, :o, BagNode(ArrayNode(KBEntry(s, 1:n)), [1:n]))
 end
 
-
-"""
-add_residual_layer(kb::KnowledgeBase, inputs::Tuple{Symbol}, n::Int)
-
-adds a residual layer mixing `inputs` in `kb` KnowledgeBase over `n` items
-"""
-function add_residual_layer(kb::KnowledgeBase, inputs::NTuple{N,Symbol}, n::Int, prefix="res") where {N}
-    childs = map(s -> ArrayNode(KBEntry(s, 1:n)), inputs)
-    ds = ProductNode(childs)
-    append(kb, layer_name(kb, prefix), ds)
-end
-
-"""
-layer_name(kb::KnowledgeBase, prefix)
-
-create a unique name of the layer for KnowledgeBase `kb`
-"""
-layer_name(kb::KnowledgeBase{KS,<:Any}, prefix) where {KS} = Symbol(prefix * "_$(length(KS)+1)")
-
-
-
-
 """
 feature_vectors(ex::ObjPairBin, state) 
 
 Creates a matrix with one column per pairs of objects and encode by one-hot-encoding
 """
 function feature_vectors(ex::ObjPairBin, state)
-
-    idim = 2 * (length(ex.unary_predicates) + length(ex.objtype2id) + length(ex.constmap)) 
-        + length(ex.multiarg_predicates) + length(ex.nullary_predicates) + length(ex.multiarg_predicates)
+    idim = length(ex.nullary_predicates) + 2 * (length(ex.unary_predicates) + length(ex.objtype2id) + length(ex.constmap)) + length(ex.multiarg_predicates)
     x = zeros(Float32, idim, length(ex.pairs))
-    
-    # first object in pair
 
-    offset = length(ex.unary_predicates) + length(ex.objtype2id)
-    for (k, i) in ex.constmap
-        js = ex.obj2id[k]
-        for (j, pos) in js
-            x[offset + i, j, post]
-        end
-    end
-
-        # encode constants
-        offset = length(ex.nunanary_predicates) + length(ex.objtype2id)
-        for (k, i) in ex.constmap
-            j = ex.obj2id[k]
-            x[offset+i, j] = 1
-        end
-
-
-
-    # 2 * (
-
-    # unary_predicates  
-
-
-    # encode types of objects
-    
-    
-    # encode constants
-
-    # )
+    # length of feature vector of one object in a pair
+    obj_length = length(ex.unary_predicates) + length(ex.objtype2id) + length(ex.constmap)
 
 
 
     # nullary_predicates
+    for (_, i) in ex.nullary_predicates
+        x[i, :] .= 1
+    end
 
 
+    # encode unary predicates
+    offset = length(ex.nullary_predicates)
+    for f in get_facts(state)
+        length(get_args(f)) != 1 && continue
+        (f isa PDDL.Compound) && (f.name == :not) && continue
 
-    # multiarg_predicates
-
-
-end
-
-
-"""
-nunary_predicates(ex::ObjPairBin, state)
-
-Create matrix with one column per object and encode by one-hot-encoding unary predicates 
-and types of objects. Nunary predicates are encoded as properties of all objects.
-"""
-function nunary_predicates(ex::ObjPairBin, state)
-    # first, we completely specify the matrix with properties
-    idim = length(ex.nunanary_predicates) + length(ex.objtype2id) + length(ex.constmap)
-    x = zeros(Float32, idim, length(ex.obj2id))
-
-    # encode constants
-    offset = length(ex.nunanary_predicates) + length(ex.objtype2id)
-    for (k, i) in ex.constmap
-        j = ex.obj2id[k]
-        x[offset+i, j] = 1
+        pred_id = ex.unary_predicates[f.name]
+        vids = ex.obj2pid[only(get_args(f)).name]
+        for (vid, pos) in vids
+            x[offset+(pos-1)*obj_length+pred_id, vid] = 1
+        end
     end
 
     # encode types of objects
     for s in state.types
         i = ex.objtype2id[s.name]
-        j = ex.obj2id[only(s.args).name]
-        x[i, j] = 1
+        js = ex.obj2pid[only(s.args).name]
+        for (j, pos) in js
+            x[(pos-1)*obj_length+i, j] = 1
+        end
     end
 
-    for f in filter(f -> length(get_args(f)) < 2, get_facts(state))
-        v = 1
-        if (f isa PDDL.Compound) && (f.name == :not)
-            f = only(f.args)
-            v = 0
-        end
-        a = get_args(f)
-        pid = ex.nunanary_predicates[f.name]
-        if length(a) == 1
-            vid = ex.obj2id[only(get_args(f)).name]
-            x[pid, vid] = v
-        else
-            length(a) == 0
-            x[pid, :] .= v
+    # encode constants
+    offset = length(ex.nullary_predicates) + length(ex.unary_predicates) + length(ex.objtype2id)
+    for (k, i) in ex.constmap
+        js = ex.obj2pid[k]
+        for (j, pos) in js
+            x[offset+(pos-1)*obj_length+i, j] = 1
         end
     end
+
+
+    # encode predicate relatedness
+    offset = length(ex.nullary_predicates) + 2 * obj_length
+    for f in get_facts(state)
+        length(get_args(f)) < 2 && continue
+        (f isa PDDL.Compound) && (f.name == :not) && continue
+
+        pred_id = ex.multiarg_predicates[f.name]
+        is = [ex.obj2id[o.name] for o in get_args(f)]
+
+        for (i, id) in enumerate(is)
+            for j in i+1:length(is)
+                # ordering ids of objects for formula to work
+                id1, id2 = id < is[j] ? (id, is[j]) : (is[j], id)
+                # formula for getting pair id
+                pid = Int(((length(ex.obj2id) + (length(ex.obj2id) - (id1 - 1) + 1)) * (id1 - 1) / 2)) + 1 + (id2 - id1)
+                x[offset+pred_id, pid] = 1
+            end
+        end
+    end
+
     x
 end
 
-
 function multi_predicates(ex::ObjPairBin, kid::Symbol, state, prefix=nothing)
     # Then, we specify the predicates the dirty way
-    ks = ex.multiarg_predicates
+    ks = tuple(collect(keys(ex.multiarg_predicates))...)
     xs = map(ks) do k
         preds = filter(f -> f.name == k, get_facts(state))
         encode_predicates(ex, k, preds, kid)
@@ -285,15 +245,29 @@ function multi_predicates(ex::ObjPairBin, kid::Symbol, state, prefix=nothing)
     ProductNode(NamedTuple{ns}(xs))
 end
 
+function encode_edges(ex::ObjPairBin, kid::Symbol)
+
+    bags = [Int64[] for _ in 1:length(ex.pairs)]
+
+    x = map(ex.pairs) do pair
+        pid = ex.pair2id[pair]
+        edges = Tuple{Int64,Int64}[]
+        for o in pair
+            pids = ex.obj2pid[o]
+            for pid_o in pids
+                pid_o[1] == pid && continue
+                push!(edges, (pid, pid_o[1]))
+            end
+        end
+    end
+end
+
 function encode_predicates(ex::ObjPairBin, pname::Symbol, preds, kid::Symbol)
-
-
     p = ex.domain.predicates[pname]
     obj2id = ex.obj2id
-    constmap = ex.constmap
 
     xs = map(collect(preds)) do f
-        [[obj2id[f.args[i].name], obj2id[f.args[j].name]] for i in 1:length(f.args)-1 for j in i+1:length(f.args)]
+        [(obj2id[f.args[i].name], obj2id[f.args[j].name]) for i in 1:length(f.args)-1 for j in i+1:length(f.args)]
     end |> (arrays -> vcat(arrays...))
 
     x = map(1:2) do i
@@ -317,13 +291,15 @@ end
 function add_goalstate(ex::ObjPairBin, problem, goal=goalstate(ex.domain, problem))
     ex = isspecialized(ex) ? ex : specialize(ex, problem)
     exg = encode_state(ex, goal, :goal)
-    ObjPairBin(ex.domain, ex.multiarg_predicates, ex.unary_predicates, ex.nullary_predicates, ex.objtype2id, ex.constmap, ex.model_params, ex.obj2id, ex.obj2pid, ex.pairs, nothing, exg)
+    ObjPairBin(ex.domain, ex.multiarg_predicates, ex.unary_predicates, ex.nullary_predicates, ex.objtype2id, ex.constmap,
+        ex.model_params, ex.obj2id, ex.obj2pid, ex.pair2id, ex.pairs, nothing, exg)
 end
 
 function add_initstate(ex::ObjPairBin, problem, start=initstate(ex.domain, problem))
     ex = isspecialized(ex) ? ex : specialize(ex, problem)
     exg = encode_state(ex, start, :start)
-    ObjPairBin(ex.domain, ex.multiarg_predicates, ex.unary_predicates, ex.nullary_predicates, ex.objtype2id, ex.constmap, ex.model_params, ex.obj2id, ex.obj2pid, ex.pairs, exg, nothing)
+    ObjPairBin(ex.domain, ex.multiarg_predicates, ex.unary_predicates, ex.nullary_predicates, ex.objtype2id, ex.constmap,
+        ex.model_params, ex.obj2id, ex.obj2pid, ex.pair2id, ex.pairs, exg, nothing)
 end
 
 function addgoal(ex::ObjPairBinStart, kb::KnowledgeBase)
@@ -337,24 +313,3 @@ end
 function addgoal(ex::ObjPairBinNoGoal, kb::KnowledgeBase)
     return (kb)
 end
-
-function stack_hypergraphs(kb1::KnowledgeBase{KX,V1}, kb2::KnowledgeBase{KX,V2}) where {KX,V1,V2}
-    x = vcat(kb1[:x1], kb2[:x1])
-    gp = map(KX[2:end-1]) do k
-        if _isstackable(kb1[k], kb2[k])
-            ProductNode(merge(kb1[k].data, kb2[k].data))
-        else
-            kb1[k]
-        end
-    end
-    KnowledgeBase(NamedTuple{KX}(tuple(x, gp..., kb1.kb[end])))
-end
-
-
-"""
-Checks if two ProductNodes should be stacked on top of each other. 
-"""
-function _isstackable(ds1::ProductNode{<:NamedTuple}, ds2::ProductNode{<:NamedTuple})
-    return (true)
-end
-_isstackable(ds1, ds2) = false
