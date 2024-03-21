@@ -126,25 +126,6 @@ function encode_state(ex::ObjectBinary, state::GenericState, prefix=nothing)
     kb = append(kb, :o, BagNode(ArrayNode(KBEntry(s, 1:n)), [1:n]))
 end
 
-
-"""
-add_residual_layer(kb::KnowledgeBase, inputs::Tuple{Symbol}, n::Int)
-
-adds a residual layer mixing `inputs` in `kb` KnowledgeBase over `n` items
-"""
-function add_residual_layer(kb::KnowledgeBase, inputs::NTuple{N,Symbol}, n::Int, prefix="res") where {N}
-    childs = map(s -> ArrayNode(KBEntry(s, 1:n)), inputs)
-    ds = ProductNode(childs)
-    append(kb, layer_name(kb, prefix), ds)
-end
-
-"""
-layer_name(kb::KnowledgeBase, prefix)
-
-create a unique name of the layer for KnowledgeBase `kb`
-"""
-layer_name(kb::KnowledgeBase{KS,<:Any}, prefix) where {KS} = Symbol(prefix * "_$(length(KS)+1)")
-
 """
 nunary_predicates(ex::ObjectBinary, state)
 
@@ -265,24 +246,3 @@ end
 function addgoal(ex::ObjectBinaryNoGoal, kb::KnowledgeBase)
     return (kb)
 end
-
-function stack_hypergraphs(kb1::KnowledgeBase{KX,V1}, kb2::KnowledgeBase{KX,V2}) where {KX,V1,V2}
-    x = vcat(kb1[:x1], kb2[:x1])
-    gp = map(KX[2:end-1]) do k
-        if _isstackable(kb1[k], kb2[k])
-            ProductNode(merge(kb1[k].data, kb2[k].data))
-        else
-            kb1[k]
-        end
-    end
-    KnowledgeBase(NamedTuple{KX}(tuple(x, gp..., kb1.kb[end])))
-end
-
-
-"""
-Checks if two ProductNodes should be stacked on top of each other. 
-"""
-function _isstackable(ds1::ProductNode{<:NamedTuple}, ds2::ProductNode{<:NamedTuple})
-    return (true)
-end
-_isstackable(ds1, ds2) = false

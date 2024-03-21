@@ -246,19 +246,17 @@ function multi_predicates(ex::ObjPairBin, kid::Symbol, state, prefix=nothing)
 end
 
 function encode_edges(ex::ObjPairBin, kid::Symbol)
-
     bags = [Int64[] for _ in 1:length(ex.pairs)]
 
-    x = map(ex.pairs) do pair
-        pid = ex.pair2id[pair]
+    x = map(collect(keys(ex.obj2id))) do obj
+        pairs = ex.obj2pid[obj]
         edges = Tuple{Int64,Int64}[]
-        for o in pair
-            pids = ex.obj2pid[o]
-            for pid_o in pids
-                pid_o[1] == pid && continue
-                push!(edges, (pid, pid_o[1]))
-            end
+        for i in 1:length(pairs)
+            pid = pairs[i][1]
+            es = [(pid, pairs[j][1]) for j in i+1:length(pairs) if pid != pairs[j][1]]
+            push!(edges, es...)
         end
+        edges
     end
 end
 
